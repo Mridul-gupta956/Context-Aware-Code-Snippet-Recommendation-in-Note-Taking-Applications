@@ -1,1 +1,4 @@
 project_id = "kxdtddlmshmzeuascddf"
+
+[functions.analyze-code-context]
+verify_jwt = false

@@ -1,9 +1,10 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Code2 } from "lucide-react";
-import { useState } from "react";
+import { Copy, Check, Code2, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 interface CodeSnippet {
   id: string;
@@ -19,75 +20,55 @@ interface CodeSnippetPanelProps {
 
 export const CodeSnippetPanel = ({ noteContent }: CodeSnippetPanelProps) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [snippets, setSnippets] = useState<CodeSnippet[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Mock AI-generated suggestions based on note content
-  const generateSuggestions = (content: string): CodeSnippet[] => {
-    const suggestions: CodeSnippet[] = [];
-    const lowerContent = content.toLowerCase();
+  useEffect(() => {
+    const fetchSuggestions = async () => {
+      if (!noteContent || noteContent.length < 10) {
+        setSnippets([]);
+        return;
+      }
 
-    if (lowerContent.includes("sort") || lowerContent.includes("quicksort")) {
-      suggestions.push({
-        id: "1",
-        language: "python",
-        code: `def quicksort(arr):
-    if len(arr) <= 1:
-        return arr
-    pivot = arr[len(arr) // 2]
-    left = [x for x in arr if x < pivot]
-    middle = [x for x in arr if x == pivot]
-    right = [x for x in arr if x > pivot]
-    return quicksort(left) + middle + quicksort(right)`,
-        description: "Quicksort algorithm implementation",
-        relevance: 95,
-      });
-    }
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('analyze-code-context', {
+          body: { noteContent }
+        });
 
-    if (lowerContent.includes("function") || lowerContent.includes("array")) {
-      suggestions.push({
-        id: "2",
-        language: "javascript",
-        code: `const sortArray = (arr) => {
-  return arr.sort((a, b) => a - b);
-};`,
-        description: "Simple array sorting in JavaScript",
-        relevance: 88,
-      });
-    }
+        if (error) throw error;
 
-    if (lowerContent.includes("data structure") || lowerContent.includes("tree")) {
-      suggestions.push({
-        id: "3",
-        language: "java",
-        code: `class TreeNode {
-    int val;
-    TreeNode left;
-    TreeNode right;
-    
-    TreeNode(int val) {
-        this.val = val;
-    }
-}`,
-        description: "Binary tree node structure",
-        relevance: 82,
-      });
-    }
+        if (data?.snippets) {
+          const formattedSnippets = data.snippets.map((snippet: any, index: number) => ({
+            id: `snippet-${index}`,
+            language: snippet.language,
+            code: snippet.code,
+            description: snippet.description,
+            relevance: snippet.relevance
+          }));
+          setSnippets(formattedSnippets);
+        }
+      } catch (error: any) {
+        console.error('Error fetching code suggestions:', error);
+        if (error.message?.includes('Rate limit')) {
+          toast.error('Rate limit reached. Please wait a moment.');
+        } else if (error.message?.includes('credits')) {
+          toast.error('AI credits exhausted. Please add credits to continue.');
+        } else {
+          toast.error('Failed to fetch code suggestions');
+        }
+        setSnippets([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-    if (suggestions.length === 0 && content.length > 10) {
-      suggestions.push({
-        id: "4",
-        language: "python",
-        code: `# Example code snippet
-def hello_world():
-    print("Hello, World!")`,
-        description: "Basic Python function",
-        relevance: 60,
-      });
-    }
+    const debounceTimer = setTimeout(() => {
+      fetchSuggestions();
+    }, 1000);
 
-    return suggestions;
-  };
-
-  const snippets = generateSuggestions(noteContent);
+    return () => clearTimeout(debounceTimer);
+  }, [noteContent]);
 
   const copyToClipboard = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
@@ -110,7 +91,12 @@ def hello_world():
         </p>
       </div>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {snippets.length === 0 ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+            <Loader2 className="w-16 h-16 mb-4 animate-spin opacity-50" />
+            <p className="text-center">Analyzing your notes...</p>
+          </div>
+        ) : snippets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
             <Code2 className="w-16 h-16 mb-4 opacity-20" />
             <p className="text-center">No suggestions yet. Start typing your notes to get relevant code snippets.</p>
